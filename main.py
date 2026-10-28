@@ -37,37 +37,86 @@ def load_settings() -> dict:
     return settings
 
 
-def prompt_value(current, message: str, *, hidden: bool = False) -> str:
-    value = str(current).strip() if current is not None else ""
-    if value:
-        return value
+def prompt_value(current, message: str, *, hidden: bool = False, allow_empty: bool = False) -> str:
+    current_value = str(current).strip() if current is not None else ""
 
     while True:
         try:
             value = (getpass.getpass(message) if hidden else input(message)).strip()
         except (EOFError, KeyboardInterrupt):
             raise KeyboardInterrupt
+
         if value:
             return value
+        if allow_empty and current_value:
+            return current_value
+        if allow_empty and not current_value:
+            return ""
         print("This setting cannot be empty. Please try again.")
+
+
+def ask_to_change_settings() -> str:
+    while True:
+        answer = input(
+            "A setting.json file was found. Change settings? [y/N/skip]: "
+        ).strip().lower()
+        if answer in ("", "n", "no", "skip", "s"):
+            return "skip"
+        if answer in ("y", "yes"):
+            return "change"
+        print("Please enter y, n, or skip.")
+
+
+def normalize_settings(settings: dict) -> tuple[str, int, str]:
+    token = str(settings.get("token", "")).strip()
+    channel_value = str(settings.get("channel_id", "")).strip()
+    emoji = str(settings.get("emoji", "")).strip()
+
+    if not token:
+        raise ValueError("Missing Discord token in setting.json.")
+    if not channel_value.isdigit():
+        raise ValueError("Channel ID in setting.json must contain digits only.")
+    if not emoji:
+        raise ValueError("Missing emoji in setting.json.")
+
+    return token, int(channel_value), emoji
 
 
 def read_settings() -> tuple[str, int, str]:
     settings = load_settings()
+    settings_exist = SETTINGS_FILE.exists() and bool(settings)
 
-    token = prompt_value(settings.get("token"), "Enter Discord token: ", hidden=True)
+    if settings_exist:
+        action = ask_to_change_settings()
+        if action == "skip":
+            return normalize_settings(settings)
+
+    current_token = settings.get("token")
+    token = prompt_value(
+        current_token,
+        "Enter Discord token (leave blank to keep the current token): " if current_token else "Enter Discord token: ",
+        hidden=True,
+        allow_empty=bool(current_token),
+    )
 
     while True:
-        channel_input = prompt_value(settings.get("channel_id"), "Enter channel ID: ")
-        if not channel_input.isdigit():
-            print("Channel ID must contain digits only. Please try again.")
-            settings["channel_id"] = ""
-            continue
+        current_channel = settings.get("channel_id")
+        channel_input = prompt_value(
+            current_channel,
+            "Enter channel ID (leave blank to keep the current ID): " if current_channel else "Enter channel ID: ",
+            allow_empty=bool(current_channel),
+        )
+        if channel_input.isdigit():
+            target_channel_id = int(channel_input)
+            break
+        print("Channel ID must contain digits only. Please try again.")
 
-        target_channel_id = int(channel_input)
-        break
-
-    emoji = prompt_value(settings.get("emoji"), "Enter emoji: ")
+    current_emoji = settings.get("emoji")
+    emoji = prompt_value(
+        current_emoji,
+        "Enter emoji (leave blank to keep the current emoji): " if current_emoji else "Enter emoji: ",
+        allow_empty=bool(current_emoji),
+    )
 
     settings.update({
         "token": token,
